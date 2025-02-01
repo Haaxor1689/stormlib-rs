@@ -13,8 +13,7 @@ fn main() {
 
   #[cfg(target_os = "windows")]
   {
-    cfg.cxxflag("-D UNICODE")
-    .cxxflag("-D _UNICODE");
+    cfg.cxxflag("-D UNICODE").cxxflag("-D _UNICODE");
   }
 
   #[cfg(target_os = "macos")]
@@ -22,9 +21,7 @@ fn main() {
     cfg.cflag("-Wno-implicit-function-declaration");
   }
 
-  let dst = cfg
-    .define("BUILD_SHARED_LIBS", "OFF")
-    .build();
+  let dst = cfg.define("BUILD_SHARED_LIBS", "OFF").build();
 
   let lib = dst.join("lib");
 
@@ -37,7 +34,7 @@ fn main() {
   {
     println!("cargo::rustc-link-lib=static=StormLib");
     println!("cargo:rustc-link-lib=user32");
-  } 
+  }
 
   #[cfg(target_os = "macos")]
   {
@@ -45,8 +42,8 @@ fn main() {
     println!("cargo:rustc-link-lib=dylib=c++");
     println!("cargo:rustc-link-lib=z");
     println!("cargo:rustc-link-lib=bz2");
-  } 
-  
+  }
+
   #[cfg(target_os = "linux")]
   {
     println!("cargo:rustc-link-lib=static=storm");

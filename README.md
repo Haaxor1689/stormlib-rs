@@ -1,7 +1,6 @@
 [![Rust](https://github.com/wc3tools/stormlib-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/wc3tools/stormlib-rs/actions/workflows/rust.yml)
 
-Rust [StormLib](https://github.com/ladislav-zezula/StormLib) binding for working with Blizzard MPQ archives
--
+## Rust [StormLib](https://github.com/ladislav-zezula/StormLib) binding for working with Blizzard MPQ archives
 
 ```rust
 fn test_read_utf8() {

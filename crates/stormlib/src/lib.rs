@@ -12,6 +12,14 @@ pub use constants::*;
 pub mod error;
 use error::*;
 
+pub struct CreateFileOptions<'a> {
+  path: &'a str,
+  data: &'a Vec<u8>,
+  flags: CreateFileFlags,
+  mtime: u64,
+  compression: CompressionFlags,
+}
+
 /// MPQ archive
 #[derive(Debug)]
 pub struct Archive {
@@ -19,6 +27,36 @@ pub struct Archive {
 }
 
 impl Archive {
+  /// Creates new MPQ archive
+  pub fn create<P: AsRef<Path>>(
+    path: P,
+    flags: CreateArchiveFlags,
+    max_files_count: DWORD,
+  ) -> Result<Self> {
+    #[cfg(not(target_os = "windows"))]
+    let cpath = {
+      let pathstr = path.as_ref().to_str().ok_or_else(|| StormError::NonUtf8)?;
+      CString::new(pathstr)?
+    };
+    #[cfg(target_os = "windows")]
+    let cpath = {
+      use widestring::U16CString;
+      U16CString::from_os_str(path.as_ref())
+        .map_err(|_| StormError::InteriorNul)?
+        .into_vec()
+    };
+
+    let mut handle: HANDLE = ptr::null_mut();
+    unsafe_try_call!(SFileCreateArchive(
+      cpath.as_ptr(),
+      flags.bits(),
+      max_files_count,
+      &mut handle
+    ));
+
+    Ok(Archive { handle })
+  }
+
   /// Opens a MPQ archive
   pub fn open<P: AsRef<Path>>(path: P, flags: OpenArchiveFlags) -> Result<Self> {
     #[cfg(not(target_os = "windows"))]
@@ -29,18 +67,42 @@ impl Archive {
     #[cfg(target_os = "windows")]
     let cpath = {
       use widestring::U16CString;
-      U16CString::from_os_str(path.as_ref()).map_err(|_| StormError::InteriorNul)?.into_vec()
+      U16CString::from_os_str(path.as_ref())
+        .map_err(|_| StormError::InteriorNul)?
+        .into_vec()
     };
+
     let mut handle: HANDLE = ptr::null_mut();
-    unsafe {
-      unsafe_try_call!(SFileOpenArchive(
-        cpath.as_ptr(),
-        0,
-        flags.bits(),
-        &mut handle as *mut HANDLE,
-      ));
-      Ok(Archive { handle })
+    unsafe_try_call!(SFileOpenArchive(
+      cpath.as_ptr(),
+      0,
+      flags.bits(),
+      &mut handle
+    ));
+
+    Ok(Archive { handle })
+  }
+
+  /// Flushes in-memory changes to the archive on disk. This function is not necessary to call, as the archive will be flushed automatically when closed
+  pub fn flush(&mut self) -> Result<()> {
+    unsafe_try_call!(SFileFlushArchive(self.handle));
+    Ok(())
+  }
+
+  /// Compacts the archive with an optional progress callback
+  pub fn compact(&mut self, callback: Option<SFILE_COMPACT_CALLBACK>) -> Result<()> {
+    if let Some(cb) = callback {
+      unsafe_try_call!(SFileSetCompactCallback(self.handle, cb, ptr::null_mut()));
     }
+
+    unsafe_try_call!(SFileCompactArchive(self.handle, ptr::null_mut(), false));
+
+    // Reset the callback
+    if callback.is_some() {
+      unsafe_try_call!(SFileSetCompactCallback(self.handle, None, ptr::null_mut()));
+    }
+
+    Ok(())
   }
 
   /// Quick check if the file exists within MPQ archive, without opening it
@@ -48,29 +110,84 @@ impl Archive {
     let cpath = CString::new(path)?;
     unsafe {
       let r = SFileHasFile(self.handle, cpath.as_ptr());
-      let err = GetLastError();
-      if !r && err != ERROR_FILE_NOT_FOUND {
-        return Err(From::from(ErrorCode(err)));
+      if !r {
+        let err = GetLastError();
+        if err != ERROR_FILE_NOT_FOUND {
+          return Err(From::from(ErrorCode(err)));
+        }
       }
       Ok(r)
     }
+  }
+
+  /// Creates a new file within the archive
+  pub fn create_file<'a>(&'a mut self, opts: &'a CreateFileOptions) -> Result<()> {
+    let cpath = CString::new(opts.path)?;
+
+    let mut file_handle: HANDLE = ptr::null_mut();
+    unsafe_try_call!(SFileCreateFile(
+      self.handle,
+      cpath.as_ptr(),
+      opts.mtime,
+      opts.data.len() as u32,
+      0,
+      opts.flags.bits(),
+      &mut file_handle,
+    ));
+
+    unsafe_try_call!(SFileWriteFile(
+      file_handle,
+      opts.data.as_ptr() as *const _,
+      opts.data.len() as u32,
+      opts.compression.bits(),
+    ));
+
+    unsafe_try_call!(SFileFinishFile(file_handle));
+
+    Ok(())
   }
 
   /// Opens a file from MPQ archive
   pub fn open_file<'a>(&'a mut self, path: &str) -> Result<File<'a>> {
     let mut file_handle: HANDLE = ptr::null_mut();
     let cpath = CString::new(path)?;
+
     unsafe_try_call!(SFileOpenFileEx(
       self.handle,
       cpath.as_ptr(),
       0,
-      &mut file_handle as *mut HANDLE
+      &mut file_handle
     ));
+
     Ok(File {
       archive: self,
       file_handle,
       size: None,
       need_reset: false,
+    })
+  }
+
+  pub fn remove_file(self, path: &str) -> Result<bool> {
+    let cpath = CString::new(path)?;
+    unsafe {
+      let r = SFileRemoveFile(self.handle, cpath.as_ptr(), 0);
+      if !r {
+        let err = GetLastError();
+        if err != ERROR_FILE_NOT_FOUND {
+          return Err(From::from(ErrorCode(err)));
+        }
+      }
+      Ok(r)
+    }
+  }
+
+  /// Searches for files within the archive. If `search_phrase` is `None`, all files will be returned
+  pub fn search<'a>(&'a self, filter: Option<&str>) -> Result<Search<'a>> {
+    let cfilter = CString::new(filter.unwrap_or("*"))?;
+    Ok(Search {
+      archive: self,
+      filter: cfilter,
+      find_handle: None,
     })
   }
 }
@@ -96,18 +213,18 @@ impl<'a> File<'a> {
   /// Retrieves a size of the file within archive
   pub fn get_size(&mut self) -> Result<u64> {
     if let Some(size) = self.size.clone() {
-      Ok(size)
-    } else {
-      let mut high: DWORD = 0;
-      let low = unsafe { SFileGetFileSize(self.file_handle, &mut high as *mut DWORD) };
-      if low == SFILE_INVALID_SIZE {
-        return Err(From::from(ErrorCode(unsafe { GetLastError() })));
-      }
-      let high = (high as u64) << 32;
-      let size = high | (low as u64);
-      self.size = Some(size);
       return Ok(size);
     }
+
+    let mut high: DWORD = 0;
+    let low = unsafe { SFileGetFileSize(self.file_handle, &mut high) };
+    if low == SFILE_INVALID_SIZE {
+      return Err(From::from(ErrorCode(unsafe { GetLastError() })));
+    }
+    let high = (high as u64) << 32;
+    let size = high | (low as u64);
+    self.size = Some(size);
+    return Ok(size);
   }
 
   /// Reads all data from the file
@@ -125,16 +242,19 @@ impl<'a> File<'a> {
     buf.resize(buf.capacity(), 0);
     let mut read: DWORD = 0;
     self.need_reset = true;
+
     unsafe_try_call!(SFileReadFile(
       self.file_handle,
       std::mem::transmute(buf.as_mut_ptr()),
       size as u32,
-      &mut read as *mut DWORD,
+      &mut read,
       ptr::null_mut(),
     ));
+
     if (read as u64) < size {
       buf.truncate(read as usize);
     }
+
     Ok(buf)
   }
 }
@@ -143,6 +263,50 @@ impl<'a> std::ops::Drop for File<'a> {
   fn drop(&mut self) {
     unsafe {
       SFileCloseFile(self.file_handle);
+    }
+  }
+}
+
+/// Search iterator
+#[derive(Debug)]
+pub struct Search<'a> {
+  archive: &'a Archive,
+  filter: CString,
+  find_handle: Option<HANDLE>,
+}
+
+impl<'a> Iterator for Search<'a> {
+  type Item = SFILE_FIND_DATA;
+
+  fn next(&mut self) -> Option<Self::Item> {
+    let mut file_data: Option<SFILE_FIND_DATA> = None;
+
+    if let Some(handle) = self.find_handle {
+      unsafe { SFileFindNextFile(handle, &mut *file_data.as_mut().unwrap()) };
+    } else {
+      let handle = unsafe {
+        SFileFindFirstFile(
+          self.archive.handle,
+          self.filter.as_ptr(),
+          &mut *file_data.as_mut().unwrap(),
+          ptr::null_mut(),
+        )
+      };
+      if !handle.is_null() {
+        self.find_handle = Some(handle);
+      }
+    };
+
+    file_data
+  }
+}
+
+impl<'a> Drop for Search<'a> {
+  fn drop(&mut self) {
+    if let Some(handle) = self.find_handle {
+      unsafe {
+        SFileFindClose(handle);
+      }
     }
   }
 }
@@ -168,10 +332,14 @@ fn test_read() {
 #[cfg(target_os = "windows")]
 #[test]
 fn test_read_unicode() {
-  use widestring::U16CString;
   use std::os::windows::ffi::OsStringExt;
+  use widestring::U16CString;
   let mut archive = Archive::open(
-    OsString::from_wide(&U16CString::from_str("../../samples/中文.w3x").unwrap().into_vec()),
+    OsString::from_wide(
+      &U16CString::from_str("../../samples/中文.w3x")
+        .unwrap()
+        .into_vec(),
+    ),
     OpenArchiveFlags::MPQ_OPEN_NO_LISTFILE | OpenArchiveFlags::MPQ_OPEN_NO_ATTRIBUTES,
   )
   .unwrap();
