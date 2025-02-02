@@ -84,13 +84,13 @@ impl Archive {
   }
 
   /// Flushes in-memory changes to the archive on disk. This function is not necessary to call, as the archive will be flushed automatically when closed
-  pub fn flush(&mut self) -> Result<()> {
+  pub fn flush(&self) -> Result<()> {
     unsafe_try_call!(SFileFlushArchive(self.handle));
     Ok(())
   }
 
   /// Compacts the archive with an optional progress callback
-  pub fn compact(&mut self, callback: Option<SFILE_COMPACT_CALLBACK>) -> Result<()> {
+  pub fn compact(&self, callback: Option<SFILE_COMPACT_CALLBACK>) -> Result<()> {
     if let Some(cb) = callback {
       unsafe_try_call!(SFileSetCompactCallback(self.handle, cb, ptr::null_mut()));
     }
@@ -106,7 +106,7 @@ impl Archive {
   }
 
   /// Quick check if the file exists within MPQ archive, without opening it
-  pub fn has_file(&mut self, path: &str) -> Result<bool> {
+  pub fn has_file(&self, path: &str) -> Result<bool> {
     let cpath = CString::new(path)?;
     unsafe {
       let r = SFileHasFile(self.handle, cpath.as_ptr());
@@ -121,7 +121,7 @@ impl Archive {
   }
 
   /// Creates a new file within the archive
-  pub fn create_file<'a>(&'a mut self, opts: &'a CreateFileOptions) -> Result<()> {
+  pub fn create_file<'a>(&'a self, opts: &'a CreateFileOptions) -> Result<()> {
     let cpath = CString::new(opts.path)?;
 
     let mut file_handle: HANDLE = ptr::null_mut();
@@ -148,7 +148,7 @@ impl Archive {
   }
 
   /// Opens a file from MPQ archive
-  pub fn open_file<'a>(&'a mut self, path: &str) -> Result<File<'a>> {
+  pub fn open_file<'a>(&'a self, path: &str) -> Result<File<'a>> {
     let mut file_handle: HANDLE = ptr::null_mut();
     let cpath = CString::new(path)?;
 
@@ -167,7 +167,7 @@ impl Archive {
     })
   }
 
-  pub fn remove_file(self, path: &str) -> Result<bool> {
+  pub fn remove_file(&self, path: &str) -> Result<bool> {
     let cpath = CString::new(path)?;
     unsafe {
       let r = SFileRemoveFile(self.handle, cpath.as_ptr(), 0);
