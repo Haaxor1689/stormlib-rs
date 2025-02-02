@@ -279,25 +279,29 @@ impl<'a> Iterator for Search<'a> {
   type Item = SFILE_FIND_DATA;
 
   fn next(&mut self) -> Option<Self::Item> {
-    let mut file_data: Option<SFILE_FIND_DATA> = None;
+    let mut file_data: SFILE_FIND_DATA = unsafe { std::mem::zeroed() };
 
     if let Some(handle) = self.find_handle {
-      unsafe { SFileFindNextFile(handle, &mut *file_data.as_mut().unwrap()) };
+      let result = unsafe { SFileFindNextFile(handle, &mut file_data) };
+      if result {
+        return Some(file_data);
+      }
     } else {
       let handle = unsafe {
         SFileFindFirstFile(
           self.archive.handle,
           self.filter.as_ptr(),
-          &mut *file_data.as_mut().unwrap(),
+          &mut file_data,
           ptr::null_mut(),
         )
       };
       if !handle.is_null() {
         self.find_handle = Some(handle);
+        return Some(file_data);
       }
-    };
+    }
 
-    file_data
+    None
   }
 }
 
@@ -327,6 +331,73 @@ fn test_read() {
     f.read_all().unwrap(),
     std::fs::read("../../samples/war3map.j").unwrap()
   );
+}
+
+#[test]
+fn test_create_archive() {
+  let archive_path = "../../samples/test_create_archive.mpq";
+  let file_path = "test.txt";
+  let file_data = b"Hello, MPQ!";
+  let file_size = file_data.len() as u64;
+
+  let result = std::panic::catch_unwind(|| {
+    {
+      // Create a new archive
+      let mut archive =
+        Archive::create(archive_path, CreateArchiveFlags::MPQ_CREATE_LISTFILE, 1000).unwrap();
+
+      // Create a new file within the archive
+      let opts = CreateFileOptions {
+        path: file_path,
+        data: &file_data.to_vec(),
+        flags: CreateFileFlags::MPQ_FILE_COMPRESS,
+        mtime: 0,
+        compression: CompressionFlags::MPQ_COMPRESSION_ZLIB,
+      };
+      archive.create_file(&opts).unwrap();
+
+      // Ensure the file exists within the archive
+      assert_eq!(archive.has_file(file_path).unwrap(), true);
+    }
+
+    {
+      // Reopen the archive
+      let mut archive =
+        Archive::open(archive_path, OpenArchiveFlags::STREAM_FLAG_READ_ONLY).unwrap();
+
+      // Ensure the file exists within the archive
+      assert_eq!(archive.has_file(file_path).unwrap(), true);
+      assert_eq!(archive.has_file("missing").unwrap(), false);
+
+      {
+        // Search for the file within the archive
+        let mut search = archive.search(Some(file_path)).unwrap();
+        let search_result = search.next();
+        assert!(search_result.is_some());
+        let result_file_name = String::from_utf8(
+          search_result
+            .unwrap()
+            .cFileName
+            .iter()
+            .map(|&x| x as u8)
+            .collect(),
+        )
+        .unwrap();
+        assert!(result_file_name.starts_with(file_path));
+      }
+
+      // Open the file and compare its size and data to the original data
+      let mut file = archive.open_file(file_path).unwrap();
+      assert_eq!(file.get_size().unwrap(), file_size);
+      assert_eq!(file.read_all().unwrap(), file_data.to_vec());
+    }
+  });
+
+  // Clean up
+  std::fs::remove_file(archive_path).unwrap();
+
+  // Propagate any panic that occurred during the test
+  result.unwrap();
 }
 
 #[cfg(target_os = "windows")]
