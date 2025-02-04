@@ -13,11 +13,11 @@ pub mod error;
 use error::*;
 
 pub struct CreateFileOptions<'a> {
-  path: &'a str,
-  data: &'a Vec<u8>,
-  flags: CreateFileFlags,
-  mtime: u64,
-  compression: CompressionFlags,
+  pub path: &'a str,
+  pub data: &'a Vec<u8>,
+  pub flags: CreateFileFlags,
+  pub mtime: u64,
+  pub compression: CompressionFlags,
 }
 
 /// MPQ archive
@@ -121,7 +121,7 @@ impl Archive {
   }
 
   /// Creates a new file within the archive
-  pub fn create_file<'a>(&'a self, opts: &'a CreateFileOptions) -> Result<()> {
+  pub fn create_file<'a>(&'a self, opts: CreateFileOptions) -> Result<()> {
     let cpath = CString::new(opts.path)?;
 
     let mut file_handle: HANDLE = ptr::null_mut();
@@ -343,18 +343,19 @@ fn test_create_archive() {
   let result = std::panic::catch_unwind(|| {
     {
       // Create a new archive
-      let mut archive =
+      let archive =
         Archive::create(archive_path, CreateArchiveFlags::MPQ_CREATE_LISTFILE, 1000).unwrap();
 
       // Create a new file within the archive
-      let opts = CreateFileOptions {
-        path: file_path,
-        data: &file_data.to_vec(),
-        flags: CreateFileFlags::MPQ_FILE_COMPRESS,
-        mtime: 0,
-        compression: CompressionFlags::MPQ_COMPRESSION_ZLIB,
-      };
-      archive.create_file(&opts).unwrap();
+      archive
+        .create_file(CreateFileOptions {
+          path: file_path,
+          data: &file_data.to_vec(),
+          flags: CreateFileFlags::MPQ_FILE_COMPRESS,
+          mtime: 0,
+          compression: CompressionFlags::MPQ_COMPRESSION_ZLIB,
+        })
+        .unwrap();
 
       // Ensure the file exists within the archive
       assert_eq!(archive.has_file(file_path).unwrap(), true);
@@ -362,8 +363,7 @@ fn test_create_archive() {
 
     {
       // Reopen the archive
-      let mut archive =
-        Archive::open(archive_path, OpenArchiveFlags::STREAM_FLAG_READ_ONLY).unwrap();
+      let archive = Archive::open(archive_path, OpenArchiveFlags::STREAM_FLAG_READ_ONLY).unwrap();
 
       // Ensure the file exists within the archive
       assert_eq!(archive.has_file(file_path).unwrap(), true);
