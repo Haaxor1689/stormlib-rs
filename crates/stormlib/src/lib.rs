@@ -92,9 +92,29 @@ impl Archive {
   }
 
   /// Compacts the archive with an optional progress callback
-  pub fn compact(&self, callback: Option<SFILE_COMPACT_CALLBACK>) -> Result<()> {
-    if let Some(cb) = callback {
-      unsafe_try_call!(SFileSetCompactCallback(self.handle, cb, ptr::null_mut()));
+  pub fn compact<F>(&self, callback: Option<F>) -> Result<()>
+  where
+    F: Fn(u32, u64, u64) + 'static,
+  {
+    if let Some(ref cb) = callback {
+      extern "C" fn c_callback<F>(
+        user_data: *mut std::ffi::c_void,
+        work_type: u32,
+        done: u64,
+        total: u64,
+      ) where
+        F: Fn(u32, u64, u64),
+      {
+        let callback = unsafe { &*(user_data as *const F) };
+        callback(work_type, done, total);
+      }
+      let cb_box = Box::new(cb);
+      let cb_ptr = Box::into_raw(cb_box) as *mut std::ffi::c_void;
+      unsafe_try_call!(SFileSetCompactCallback(
+        self.handle,
+        Some(c_callback::<F>),
+        cb_ptr
+      ));
     }
 
     unsafe_try_call!(SFileCompactArchive(self.handle, ptr::null_mut(), false));
@@ -321,7 +341,7 @@ impl<'a> Drop for Search<'a> {
 
 #[test]
 fn test_read() {
-  let mut archive = Archive::open(
+  let archive = Archive::open(
     "../../samples/test_tft.w3x",
     OpenArchiveFlags::MPQ_OPEN_NO_LISTFILE | OpenArchiveFlags::MPQ_OPEN_NO_ATTRIBUTES,
   )
@@ -367,7 +387,7 @@ fn test_create_archive() {
 
     {
       // Reopen the archive
-      let archive = Archive::open(archive_path, OpenArchiveFlags::STREAM_FLAG_READ_ONLY).unwrap();
+      let archive = Archive::open(archive_path, OpenArchiveFlags::STREAM_PROVIDER_FLAT).unwrap();
 
       // Ensure the file exists within the archive
       assert_eq!(archive.has_file(file_path).unwrap(), true);
@@ -394,6 +414,12 @@ fn test_create_archive() {
       let mut file = archive.open_file(file_path).unwrap();
       assert_eq!(file.get_size().unwrap(), file_size);
       assert_eq!(file.read_all().unwrap(), file_data.to_vec());
+
+      archive
+        .compact(Some(|work_type, done, total| {
+          println!("{}: {}/{}", work_type, done, total);
+        }))
+        .unwrap();
     }
   });
 
@@ -409,7 +435,7 @@ fn test_create_archive() {
 fn test_read_unicode() {
   use std::os::windows::ffi::OsStringExt;
   use widestring::U16CString;
-  let mut archive = Archive::open(
+  let archive = Archive::open(
     OsString::from_wide(
       &U16CString::from_str("../../samples/中文.w3x")
         .unwrap()
