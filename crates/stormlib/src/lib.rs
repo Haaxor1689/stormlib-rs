@@ -26,6 +26,8 @@ pub struct Archive {
   handle: HANDLE,
 }
 
+unsafe impl Send for Archive {}
+
 impl Archive {
   /// Creates new MPQ archive
   pub fn create<P: AsRef<Path>>(
@@ -160,7 +162,7 @@ impl Archive {
     ));
 
     Ok(File {
-      archive: self,
+      _archive: self,
       file_handle,
       size: None,
       need_reset: false,
@@ -203,11 +205,13 @@ impl std::ops::Drop for Archive {
 /// Opened file
 #[derive(Debug)]
 pub struct File<'a> {
-  archive: &'a Archive,
+  _archive: &'a Archive,
   file_handle: HANDLE,
   size: Option<u64>,
   need_reset: bool,
 }
+
+unsafe impl<'a> Send for File<'a> {}
 
 impl<'a> File<'a> {
   /// Retrieves a size of the file within archive
