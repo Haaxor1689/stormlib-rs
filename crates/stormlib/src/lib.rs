@@ -92,9 +92,9 @@ impl Archive {
   }
 
   /// Compacts the archive with an optional progress callback
-  pub fn compact<F>(&self, callback: Option<F>) -> Result<()>
+  pub fn compact<'a, F>(&self, callback: Option<F>) -> Result<()>
   where
-    F: Fn(u32, u64, u64) + 'static,
+    F: Fn(u32, u64, u64) + 'a,
   {
     if let Some(ref cb) = callback {
       extern "C" fn c_callback<F>(
