@@ -96,7 +96,7 @@ impl Archive {
   where
     F: Fn(u32, u64, u64) + 'a,
   {
-    if let Some(ref cb) = callback {
+    if let Some(cb) = callback.as_ref() {
       extern "C" fn c_callback<F>(
         user_data: *mut std::ffi::c_void,
         work_type: u32,
@@ -108,8 +108,8 @@ impl Archive {
         let callback = unsafe { &*(user_data as *const F) };
         callback(work_type, done, total);
       }
-      let cb_box = Box::new(cb);
-      let cb_ptr = Box::into_raw(cb_box) as *mut std::ffi::c_void;
+
+      let cb_ptr = cb as *const F as *mut std::ffi::c_void;
       unsafe_try_call!(SFileSetCompactCallback(
         self.handle,
         Some(c_callback::<F>),
