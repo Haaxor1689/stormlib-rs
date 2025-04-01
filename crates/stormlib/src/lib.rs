@@ -92,38 +92,8 @@ impl Archive {
   }
 
   /// Compacts the archive with an optional progress callback
-  pub fn compact<'a, F>(&self, callback: Option<F>) -> Result<()>
-  where
-    F: Fn(u32, u64, u64) + 'a,
-  {
-    if let Some(cb) = callback.as_ref() {
-      extern "C" fn c_callback<F>(
-        user_data: *mut std::ffi::c_void,
-        work_type: u32,
-        done: u64,
-        total: u64,
-      ) where
-        F: Fn(u32, u64, u64),
-      {
-        let callback = unsafe { &*(user_data as *const F) };
-        callback(work_type, done, total);
-      }
-
-      let cb_ptr = cb as *const F as *mut std::ffi::c_void;
-      unsafe_try_call!(SFileSetCompactCallback(
-        self.handle,
-        Some(c_callback::<F>),
-        cb_ptr
-      ));
-    }
-
+  pub fn compact(&self) -> Result<()> {
     unsafe_try_call!(SFileCompactArchive(self.handle, ptr::null_mut(), false));
-
-    // Reset the callback
-    if callback.is_some() {
-      unsafe_try_call!(SFileSetCompactCallback(self.handle, None, ptr::null_mut()));
-    }
-
     Ok(())
   }
 
@@ -415,11 +385,7 @@ fn test_create_archive() {
       assert_eq!(file.get_size().unwrap(), file_size);
       assert_eq!(file.read_all().unwrap(), file_data.to_vec());
 
-      archive
-        .compact(Some(|work_type, done, total| {
-          println!("{}: {}/{}", work_type, done, total);
-        }))
-        .unwrap();
+      archive.compact().unwrap();
     }
   });
 
