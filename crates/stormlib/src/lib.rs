@@ -211,7 +211,7 @@ impl<'a> File<'a> {
     }
 
     let mut high: DWORD = 0;
-    let low = unsafe { SFileGetFileSize(self.file_handle, &mut high) };
+    let low = unsafe { SFileGetFileSize(self.file_handle, &mut high as *mut DWORD) };
     if low == SFILE_INVALID_SIZE {
       return Err(From::from(ErrorCode(unsafe { GetLastError() })));
     }
@@ -241,7 +241,7 @@ impl<'a> File<'a> {
       self.file_handle,
       std::mem::transmute(buf.as_mut_ptr()),
       size as u32,
-      &mut read,
+      &mut read as *mut DWORD,
       ptr::null_mut(),
     ));
 
