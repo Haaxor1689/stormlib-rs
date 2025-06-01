@@ -112,6 +112,12 @@ impl Archive {
     }
   }
 
+  /// Changes max file count of the archive
+  pub fn set_max_file_count(&self, max_files_count: DWORD) -> Result<()> {
+    unsafe_try_call!(SFileSetMaxFileCount(self.handle, max_files_count));
+    Ok(())
+  }
+
   /// Creates a new file within the archive
   pub fn create_file<'a>(&'a self, opts: CreateFileOptions) -> Result<()> {
     let cpath = CString::new(opts.path)?;
