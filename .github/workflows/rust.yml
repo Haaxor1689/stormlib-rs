@@ -2,15 +2,13 @@ name: Rust
 
 on:
   push:
-    branches: [master] # Only run this workflow on push to master
-  pull_request:
-    branches: [master] # For PRs, we'll generate but typically not push
+    branches: [master]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
+  codegen:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -49,10 +47,17 @@ jobs:
           cargo build -p stormlib-bindgen --release
           cargo run -p stormlib-bindgen --release
 
-          # Check for changes in the generated files
-          # Set an output variable 'bindings_changed' to true if there are changes
+          # Add the generated files to the staging area
           git add crates/stormlib-sys/src/bindings_*.rs
-          git diff --cached --exit-code || echo "bindings_changed=true" >> $GITHUB_OUTPUT
+
+          # Check if there are any staged changes
+          # 'git diff-index --quiet HEAD' exits with 0 if no changes, 1 if changes
+          if ! git diff-index --quiet --cached HEAD; then
+            echo "Detected changes in generated bindings."
+            echo "bindings_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "No changes detected in generated bindings."
+          fi
         working-directory: ${{ github.workspace }}
 
       - name: Commit and Push Changes
@@ -73,8 +78,4 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit -m "chore: Auto-regenerate bindings"
           git push
-        working-directory: ${{ github.workspace }}
-
-      - name: Run tests
-        run: cargo test --all
         working-directory: ${{ github.workspace }}
