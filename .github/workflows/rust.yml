@@ -9,6 +9,72 @@ env:
 
 jobs:
   codegen:
+    runs-on: ubuntu-latest # Only run this job on one OS (Ubuntu is a common choice)
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+          token: ${{ secrets.GITHUB_TOKEN }} # Needed for pushing
+
+      - name: Install LLVM (Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev
+
+      # Note: We are generating ALL bindings on this one Ubuntu runner.
+      # This requires stormlib-bindgen's main.rs to use TARGET_OS environment variable
+      # and not rely on the runner's native OS for its output file naming.
+
+      - name: Generate Bindings for all Platforms
+        id: generate_bindings # Give this step an ID to reference its output
+        shell: bash
+        run: |
+          # Build the bindgen tool once
+          cargo build -p stormlib-bindgen --release
+
+          # Run the bindgen tool for each target OS, setting the TARGET_OS env var
+          echo "Generating Windows bindings..."
+          TARGET_OS=windows cargo run -p stormlib-bindgen --release
+
+          echo "Generating Linux bindings..."
+          TARGET_OS=linux cargo run -p stormlib-bindgen --release
+
+          echo "Generating macOS bindings..."
+          TARGET_OS=macos cargo run -p stormlib-bindgen --release
+
+          # Add the generated files to the staging area
+          git add crates/stormlib-sys/src/bindings_*.rs
+
+          # Check if there are any staged changes
+          if ! git diff-index --quiet --cached HEAD; then
+            echo "Detected changes in generated bindings."
+            echo "bindings_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No changes detected in generated bindings."
+          fi
+          echo "bindings_changed status: ${{ steps.generate_bindings.outputs.bindings_changed }}"
+        working-directory: ${{ github.workspace }}
+
+      - name: Commit and Push Changes
+        # This job is dedicated to codegen and pushing.
+        # It runs only on 'push' to 'master' and if changes were detected.
+        if: |
+          steps.generate_bindings.outputs.bindings_changed == 'true' &&
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/master'
+        run: |
+          echo "Committing and pushing generated bindings."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(bindings): Auto-regenerate bindings" # More descriptive commit message
+          git push
+          echo "Changes committed and pushed successfully."
+        working-directory: ${{ github.workspace }}
+
+  # A separate job for running tests on all platforms
+  test:
+    needs: codegen # Ensure codegen job completes first, with updated bindings
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -17,16 +83,12 @@ jobs:
           - os: macos-latest
           - os: ubuntu-latest
           - os: windows-latest
-            LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
+            LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin" # Still needed for local testing to find libclang
 
     steps:
       - uses: actions/checkout@v2
         with:
-          submodules: true
-          # Essential for pushing: The token needs write permissions
-          # and to be able to push to the branch.
-          # This will clone with the GITHUB_TOKEN for subsequent git commands.
-          token: ${{ secrets.GITHUB_TOKEN }}
+          submodules: true # Essential for deps/StormLib
 
       - name: Install LLVM (Ubuntu)
         if: runner.os == 'Linux'
@@ -40,31 +102,6 @@ jobs:
         with:
           version: latest
 
-      - name: Regenerate Bindings
-        id: generate_bindings # Give this step an ID to reference its output
-        shell: bash # Explicitly use bash for this step's script
-        run: |
-          # Build and run the bindgen tool
-          cargo build -p stormlib-bindgen --release
-          cargo run -p stormlib-bindgen --release
-
-          # Add the generated files to the staging area
-          git add crates/stormlib-sys/src/bindings_*.rs
-
-          # Check if there are any staged changes
-          if ! git diff-index --quiet --cached HEAD; then
-            echo "Detected changes in generated bindings."
-            echo "bindings_changed=true" >> "$GITHUB_OUTPUT" # Use quotes for $GITHUB_OUTPUT for robustness
-          else
-            echo "No changes detected in generated bindings."
-          fi
-        working-directory: ${{ github.workspace }}
-
-      - name: Commit and Push Changes
-        if: steps.generate_bindings.outputs.bindings_changed == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: Auto-regenerate bindings"
-          git push
+      - name: Run tests
+        run: cargo test --all
         working-directory: ${{ github.workspace }}
