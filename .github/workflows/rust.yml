@@ -2,9 +2,9 @@ name: Rust
 
 on:
   push:
-    branches: [ master ]
+    branches: [master] # Only run this workflow on push to master
   pull_request:
-    branches: [ master ]
+    branches: [master] # For PRs, we'll generate but typically not push
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,12 +16,65 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
         include:
-        - os: macos-latest
-        - os: ubuntu-latest
-        - os: windows-latest
+          - os: macos-latest
+          - os: ubuntu-latest
+          - os: windows-latest
+            LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
+
     steps:
-    - uses: actions/checkout@v2
-      with:
-        submodules: true
-    - name: Run tests
-      run: cargo test --all
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+          # Essential for pushing: The token needs write permissions
+          # and to be able to push to the branch.
+          # This will clone with the GITHUB_TOKEN for subsequent git commands.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install LLVM (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev
+
+      - name: Install LLVM (Windows)
+        if: runner.os == 'Windows'
+        uses: egor-tensin/setup-clang@v1
+        with:
+          version: latest
+
+      - name: Regenerate Bindings
+        id: generate_bindings # Give this step an ID to reference its output
+        run: |
+          # Build and run the bindgen tool
+          cargo build -p stormlib-bindgen --release
+          cargo run -p stormlib-bindgen --release
+
+          # Check for changes in the generated files
+          # Set an output variable 'bindings_changed' to true if there are changes
+          git add crates/stormlib-sys/src/bindings_*.rs
+          git diff --cached --exit-code || echo "bindings_changed=true" >> $GITHUB_OUTPUT
+        working-directory: ${{ github.workspace }}
+
+      - name: Commit and Push Changes
+        # Only run this step if:
+        # 1. The 'generate_bindings' step indicated that files actually changed.
+        # 2. It's a 'push' event (not a 'pull_request') - usually, you don't push back to PRs.
+        # 3. It's running on the master branch.
+        # 4. It's on a specific OS (e.g., Ubuntu) to avoid multiple bots pushing the same change.
+        #    Choose the OS that is least likely to have platform-specific binding quirks.
+        #    Ubuntu is often a good default for this.
+        if: |
+          steps.generate_bindings.outputs.bindings_changed == 'true' &&
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/master' &&
+          runner.os == 'Linux' # Only push from one runner to avoid conflicts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: Auto-regenerate bindings"
+          git push
+        working-directory: ${{ github.workspace }}
+
+      - name: Run tests
+        run: cargo test --all
+        working-directory: ${{ github.workspace }}

@@ -112,9 +112,21 @@ impl Archive {
     }
   }
 
+  /// Retrieves current max file count of the archive
+  // pub fn get_max_file_count(&self) -> Result<DWORD> {
+  //   let mut max_files_count: DWORD = 0;
+  //   unsafe_try_call!(SFileGetMaxFileCount(self.handle, &mut max_files_count));
+  //   Ok(max_files_count)
+  // }
+
   /// Changes max file count of the archive
   pub fn set_max_file_count(&self, max_files_count: DWORD) -> Result<()> {
-    unsafe_try_call!(SFileSetMaxFileCount(self.handle, max_files_count));
+    unsafe_try_call!(SFileSetMaxFileCount(
+      self.handle,
+      max_files_count
+        .min(HASH_TABLE_SIZE_MIN)
+        .max(HASH_TABLE_SIZE_MAX)
+    ));
     Ok(())
   }
 
