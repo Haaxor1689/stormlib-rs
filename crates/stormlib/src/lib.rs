@@ -123,12 +123,7 @@ impl Archive {
       return None;
     }
 
-    // This block is unsafe because dereferencing a raw pointer is unsafe.
-    // The safety guarantees must be upheld by the caller.
-    unsafe {
-      // Dereference the raw pointer to get a reference
-      Some(&*archive_ptr)
-    }
+    unsafe { Some(&*archive_ptr) }
   }
 
   /// Changes max file count of the archive
