@@ -67,7 +67,7 @@ jobs:
           steps.generate_bindings.outputs.bindings_changed == 'true' &&
           github.event_name == 'push' &&
           github.ref == 'refs/heads/master' &&
-          runner.os == 'Linux' # Only push from one runner to avoid conflicts
+          runner.os == 'Linux'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
