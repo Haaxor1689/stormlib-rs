@@ -78,19 +78,17 @@ jobs:
           MAX_RETRIES=5
           RETRY_DELAY_SECONDS=5
 
-          generated_file="crates/stormlib-sys/src/bindings_${{ runner.os == 'Windows' && 'windows' || runner.os == 'Linux' && 'linux' || 'macos' }}.rs"
+          generated_file="crates/stormlib-sys/src/bindings_${{ runner.os == 'Windows' && 'windows' || runner.os == 'Linux' && 'linux' || runner.os == 'macos' }}.rs"
 
           # Temporarily stash the generated (staged) file so git pull --rebase can run on a clean index
           echo "Stashing generated file(s) before git pull --rebase..."
-          git stash push -- "$generated_file" -m "Temporary stash of generated bindings"
+          # CORRECTED LINE HERE: Files before -m
+          git stash push -- "$generated_file" -m "Temporary stash of generated bindings for ${{ runner.os }}"
 
           # Check if stash was successful (stash list will be empty if nothing was stashed)
-          # We check 'git stash list' - if it returns non-zero, it means no stash was created (no changes to stash).
-          # If no stash was created, it implies no *actual* changes were to be committed.
-          # If this happens, we should probably exit gracefully.
-          STASH_COUNT=$(git stash list | wc -l) # wc -l counts lines. 0 means no stash.
+          STASH_COUNT=$(git stash list | wc -l)
           if [[ "$STASH_COUNT" -eq 0 ]]; then
-            echo "No changes found to stash. This might indicate the file was already up-to-date or not generated. Skipping commit/push."
+            echo "No changes found to stash. This means the file was already up-to-date or not generated. Skipping commit/push."
             exit 0
           fi
 
@@ -105,18 +103,17 @@ jobs:
             }
             
             # Now, reapply the stashed changes.
-            # git stash pop will also re-add the file to the index if it was staged.
             echo "Applying stashed changes..."
             git stash pop --index || {
               echo "Git stash pop failed (possible conflict or no stash remaining). This should not happen if stash was successful."
-              # If pop fails, we might have a deeper issue or conflict.
-              # For now, let's assume it should usually work.
               exit 1 # Fail fast if we can't reapply our changes
             }
             
             # Check if there are still changes to commit after rebase and reapplying stash
+            # This check is vital because git stash pop could reintroduce the same file
+            # as already committed by another job, leading to no actual changes.
             if git diff-index --quiet --cached HEAD; then
-                echo "No changes to commit after reibasing and reapplying stash. Skipping push."
+                echo "No changes to commit after rebase and reapplying stash. Skipping push."
                 exit 0 # Exit successfully if no changes needed anymore
             fi
 
