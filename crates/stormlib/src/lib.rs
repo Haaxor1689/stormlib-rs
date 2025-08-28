@@ -114,12 +114,22 @@ impl Archive {
     }
   }
 
-  /// Retrieves current max file count of the archive
-  // pub fn get_max_file_count(&self) -> Result<DWORD> {
-  //   let mut max_files_count: DWORD = 0;
-  //   unsafe_try_call!(SFileGetMaxFileCount(self.handle, &mut max_files_count));
-  //   Ok(max_files_count)
-  // }
+  pub fn get_ref(&self) -> Option<&'static _TMPQArchive> {
+    // Cast the generic HANDLE to a specific pointer type
+    let archive_ptr = self.handle as *const _TMPQArchive;
+
+    // Check if the pointer is null before dereferencing
+    if archive_ptr.is_null() {
+      return None;
+    }
+
+    // This block is unsafe because dereferencing a raw pointer is unsafe.
+    // The safety guarantees must be upheld by the caller.
+    unsafe {
+      // Dereference the raw pointer to get a reference
+      Some(&*archive_ptr)
+    }
+  }
 
   /// Changes max file count of the archive
   pub fn set_max_file_count(&self, max_files_count: DWORD) -> Result<()> {
