@@ -13,7 +13,6 @@ fn main() {
     // included header files changed.
     .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
     .allowlist_type("^S[A-Z].+")
-    .allowlist_type("_TMPQArchive")
     .allowlist_function("^S[A-Z].+")
     .allowlist_var("^ERROR_.+");
 
