@@ -9,86 +9,124 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  codegen:
-    runs-on: ubuntu-latest # Using Ubuntu for centralized generation
+  # Base template for codegen jobs (to keep it DRY)
+  .codegen_base:
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
         with:
           submodules: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Install LLVM/Clang based on OS
       - name: Install LLVM (Ubuntu)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y clang libclang-dev
 
+      - name: Install LLVM (Windows)
+        if: runner.os == 'Windows'
+        uses: egor-tensin/setup-clang@v1
+        with:
+          version: latest
+
       - name: Regenerate Bindings
         id: generate_bindings
-        shell: bash
+        # No 'shell: bash' needed here if `main.rs` detects target OS itself via `cfg!`
         run: |
-          echo "Starting binding regeneration..."
+          echo "Starting binding regeneration for ${{ runner.os }}..."
 
-          # Print Git status before generation
-          echo "--- Git status BEFORE generation ---"
-          git status
-          echo "------------------------------------"
-
-          # Store initial state for comparison
-          git diff --full-index --binary > before_generation.patch || true # Redirect output to file
-
-          # Build and run the bindgen tool
+          # Build and run the bindgen tool for the native OS
           cargo build -p stormlib-bindgen --release
-          cargo run -p stormlib-bindgen --release
+          cargo run -p stormlib-bindgen --release # This will generate bindings_OS.rs based on runner.os
 
-          # Print Git status after generation, before add
-          echo "--- Git status AFTER generation (before git add) ---"
-          git status
-          echo "---------------------------------------------------"
+          # Determine the expected filename for this OS
+          generated_file="crates/stormlib-sys/src/bindings_${{ runner.os == 'Windows' && 'windows' || runner.os == 'Linux' && 'linux' || 'macos' }}.rs"
 
-          # Show raw diff before add
-          echo "--- Diff AFTER generation (before git add) ---"
-          git diff -- crates/stormlib-sys/src/bindings_*.rs || true # Show changes on disk vs HEAD
-          echo "------------------------------------------------"
+          # Add *only this job's* generated file to the staging area
+          git add "$generated_file"
 
-          # Add the generated files to the staging area
-          git add crates/stormlib-sys/src/bindings_*.rs
-
-          # Print Git status after add
-          echo "--- Git status AFTER git add ---"
-          git status
-          echo "--------------------------------"
-
-          # Show staged diff
-          echo "--- Staged Diff (what git commit would commit) ---"
-          git diff --cached -- crates/stormlib-sys/src/bindings_*.rs || true
-          echo "--------------------------------------------------"
-
-
-          # Perform the conditional check and set output
           if ! git diff-index --quiet --cached HEAD; then
-            echo "Detected *actual changes* in staged bindings that differ from HEAD."
+            echo "Detected changes in generated bindings for ${{ runner.os }}."
             echo "bindings_changed=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No changes detected in staged bindings compared to HEAD."
+            echo "No changes detected in generated bindings for ${{ runner.os }}."
           fi
-          echo "Final 'bindings_changed' output: ${{ steps.generate_bindings.outputs.bindings_changed }}"
+          echo "bindings_changed status: ${{ steps.generate_bindings.outputs.bindings_changed }}"
         working-directory: ${{ github.workspace }}
 
-      - name: Commit and Push Changes
+      - name: Commit and Push Changes (with retry for merge conflicts)
         if: |
           steps.generate_bindings.outputs.bindings_changed == 'true' &&
           github.event_name == 'push' &&
           github.ref == 'refs/heads/master'
         run: |
-          echo "Committing and pushing generated bindings."
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore(bindings): Auto-regenerate bindings"
-          git push
-          echo "Changes committed and pushed successfully."
+
+          MAX_RETRIES=5
+          RETRY_DELAY_SECONDS=5
+
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo "Attempt $i to commit and push bindings for ${{ runner.os }}..."
+            
+            # Fetch latest changes before trying to commit/push
+            git pull --rebase origin master || {
+              echo "Git pull --rebase failed. Retrying in $RETRY_DELAY_SECONDS seconds..."
+              sleep $RETRY_DELAY_SECONDS
+              continue
+            }
+            
+            # Re-add if git rebase messed with staged files (though --rebase should preserve)
+            # This is important as git pull --rebase can lose the staged state.
+            generated_file="crates/stormlib-sys/src/bindings_${{ runner.os == 'Windows' && 'windows' || runner.os == 'Linux' && 'linux' || 'macos' }}.rs"
+            git add "$generated_file"
+            
+            # Check if there are still changes after rebase
+            if git diff-index --quiet --cached HEAD; then
+                echo "No changes to commit after rebase. Skipping push."
+                exit 0 # Exit successfully if no changes needed anymore
+            fi
+
+            git commit -m "chore(bindings): Auto-regenerate bindings for ${{ runner.os }}" && \
+            git push origin master && \
+            echo "Changes committed and pushed successfully for ${{ runner.os }}." && \
+            exit 0 || {
+              echo "Git push failed for ${{ runner.os }}. Retrying in $RETRY_DELAY_SECONDS seconds..."
+              sleep $RETRY_DELAY_SECONDS
+            }
+          done
+
+          echo "Failed to commit and push bindings for ${{ runner.os }} after $MAX_RETRIES attempts."
+          exit 1
         working-directory: ${{ github.workspace }}
 
-  test_on_demand: # Rest of the workflow (unchanged)
+  codegen_windows:
+    name: Code Generation (Windows)
+    extends: .codegen_base
+    strategy:
+      matrix:
+        os: [windows-latest]
+        include:
+          - os: windows-latest
+            LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
+
+  codegen_linux:
+    name: Code Generation (Linux)
+    extends: .codegen_base
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+
+  codegen_macos:
+    name: Code Generation (macOS)
+    extends: .codegen_base
+    strategy:
+      matrix:
+        os: [macos-latest]
+
+  test_on_demand:
     runs-on: ${{ matrix.os }}
     if: github.event_name == 'workflow_dispatch'
     strategy:
