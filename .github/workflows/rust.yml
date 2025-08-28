@@ -78,39 +78,53 @@ jobs:
           MAX_RETRIES=5
           RETRY_DELAY_SECONDS=5
 
+          # generated_file variable is needed here for logic, but not directly in stash
           generated_file="crates/stormlib-sys/src/bindings_${{ runner.os == 'Windows' && 'windows' || runner.os == 'Linux' && 'linux' || runner.os == 'macos' }}.rs"
 
-          # Temporarily stash the generated (staged) file so git pull --rebase can run on a clean index
-          echo "Stashing generated file(s) before git pull --rebase..."
-          # CORRECTED LINE HERE: Files before -m
-          git stash push -- "$generated_file" -m "Temporary stash of generated bindings for ${{ runner.os }}"
+          # Temporarily stash *only* the staged changes.
+          # This is the most reliable way to stash only what's in the index,
+          # and it implicitly gets a message from the staged commit message if there was one.
+          echo "Stashing *staged* changes before git pull --rebase..."
+          git stash --staged || true # Use || true to prevent immediate failure if nothing to stash
 
-          # Check if stash was successful (stash list will be empty if nothing was stashed)
+          # Check if a stash was actually created. 'git stash list' gives an empty output if no stash.
+          # If nothing was stashed, it implies no actual changes were to be committed.
           STASH_COUNT=$(git stash list | wc -l)
           if [[ "$STASH_COUNT" -eq 0 ]]; then
-            echo "No changes found to stash. This means the file was already up-to-date or not generated. Skipping commit/push."
+            echo "No staged changes found to stash. This implies the file was already up-to-date or not generated. Skipping commit/push."
             exit 0
           fi
 
+          # Loop for pull, commit, push
           for i in $(seq 1 $MAX_RETRIES); do
             echo "Attempt $i to commit and push bindings for ${{ runner.os }}..."
             
-            # Fetch latest changes before trying to commit/push
-            git pull --rebase origin master || {
-              echo "Git pull --rebase failed. Retrying in $RETRY_DELAY_SECONDS seconds..."
+            # Fetch latest changes before trying to pull --rebase
+            git fetch origin master || {
+              echo "Git fetch failed. Retrying in $RETRY_DELAY_SECONDS seconds..."
+              sleep $RETRY_DELAY_SECONDS
+              continue
+            }
+
+            # Rebase onto the latest master. Staged changes are now cleanly stashed.
+            git rebase origin/master || {
+              echo "Git rebase failed. Retrying in $RETRY_DELAY_SECONDS seconds..."
+              # Reapply stash before next retry, in case rebase corrupted it.
+              # And then drop it before the next fetch/rebase.
+              git stash pop || true # pop here, if it exists
               sleep $RETRY_DELAY_SECONDS
               continue
             }
             
-            # Now, reapply the stashed changes.
+            # Reapply the stashed changes.
             echo "Applying stashed changes..."
             git stash pop --index || {
-              echo "Git stash pop failed (possible conflict or no stash remaining). This should not happen if stash was successful."
+              echo "Git stash pop failed (possible conflict or no stash remaining). This should not happen if stash was successful and rebase was clean."
               exit 1 # Fail fast if we can't reapply our changes
             }
             
             # Check if there are still changes to commit after rebase and reapplying stash
-            # This check is vital because git stash pop could reintroduce the same file
+            # This is vital because git stash pop could reintroduce the same file
             # as already committed by another job, leading to no actual changes.
             if git diff-index --quiet --cached HEAD; then
                 echo "No changes to commit after rebase and reapplying stash. Skipping push."
@@ -123,6 +137,7 @@ jobs:
             exit 0 || {
               echo "Git push failed for ${{ runner.os }}. Retrying in $RETRY_DELAY_SECONDS seconds..."
               sleep $RETRY_DELAY_SECONDS
+              # If push fails, the stash has been popped, so no need to pop again next loop.
             }
           done
 
