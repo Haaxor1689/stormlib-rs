@@ -12,6 +12,8 @@ pub use constants::*;
 pub mod error;
 use error::*;
 
+pub const STORMLIB_VERSION: u32 = stormlib_sys::STORMLIB_VERSION;
+
 pub struct CreateFileOptions<'a> {
   pub path: &'a str,
   pub data: &'a Vec<u8>,
