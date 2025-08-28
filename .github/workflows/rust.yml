@@ -41,8 +41,7 @@ jobs:
 
       - name: Regenerate Bindings
         id: generate_bindings
-        # No 'shell: bash' needed here for the `run` block, as `main.rs` relies on `cfg!(target_os = "...")`
-        # and not on a `TARGET_OS` env var passed via shell.
+        shell: bash
         run: |
           echo "Starting binding regeneration for ${{ runner.os }}..."
 
@@ -56,6 +55,7 @@ jobs:
           # Add *only this job's* generated file to the staging area
           git add "$generated_file"
 
+          # Check if there are any staged changes (bash syntax)
           if ! git diff-index --quiet --cached HEAD; then
             echo "Detected changes in generated bindings for ${{ runner.os }}."
             echo "bindings_changed=true" >> "$GITHUB_OUTPUT"
@@ -66,6 +66,7 @@ jobs:
         working-directory: ${{ github.workspace }}
 
       - name: Commit and Push Changes (with retry for merge conflicts)
+        shell: bash
         if: |
           steps.generate_bindings.outputs.bindings_changed == 'true' &&
           github.event_name == 'push' &&
