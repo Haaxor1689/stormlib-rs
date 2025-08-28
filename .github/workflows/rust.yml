@@ -9,9 +9,17 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Base template for codegen jobs (to keep it DRY)
-  .codegen_base:
+  codegen:
     runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+        include:
+          # Define LIBCLANG_PATH for Windows directly within the matrix
+          - os: windows-latest
+            LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
+          # No specific LIBCLANG_PATH needed for macOS/Ubuntu typically
+
     steps:
       - uses: actions/checkout@v2
         with:
@@ -33,15 +41,16 @@ jobs:
 
       - name: Regenerate Bindings
         id: generate_bindings
-        # No 'shell: bash' needed here if `main.rs` detects target OS itself via `cfg!`
+        # No 'shell: bash' needed here for the `run` block, as `main.rs` relies on `cfg!(target_os = "...")`
+        # and not on a `TARGET_OS` env var passed via shell.
         run: |
           echo "Starting binding regeneration for ${{ runner.os }}..."
 
           # Build and run the bindgen tool for the native OS
           cargo build -p stormlib-bindgen --release
-          cargo run -p stormlib-bindgen --release # This will generate bindings_OS.rs based on runner.os
+          cargo run -p stormlib-bindgen --release # This will generate bindings_OS.rs based on runner.os's cfg!
 
-          # Determine the expected filename for this OS
+          # Determine the expected filename for this OS runner
           generated_file="crates/stormlib-sys/src/bindings_${{ runner.os == 'Windows' && 'windows' || runner.os == 'Linux' && 'linux' || 'macos' }}.rs"
 
           # Add *only this job's* generated file to the staging area
@@ -78,12 +87,11 @@ jobs:
               continue
             }
             
-            # Re-add if git rebase messed with staged files (though --rebase should preserve)
-            # This is important as git pull --rebase can lose the staged state.
+            # Re-add the specific file after the rebase, as git pull --rebase can sometimes lose the staged state.
             generated_file="crates/stormlib-sys/src/bindings_${{ runner.os == 'Windows' && 'windows' || runner.os == 'Linux' && 'linux' || 'macos' }}.rs"
             git add "$generated_file"
             
-            # Check if there are still changes after rebase
+            # Check if there are still changes to commit after rebase
             if git diff-index --quiet --cached HEAD; then
                 echo "No changes to commit after rebase. Skipping push."
                 exit 0 # Exit successfully if no changes needed anymore
@@ -101,30 +109,6 @@ jobs:
           echo "Failed to commit and push bindings for ${{ runner.os }} after $MAX_RETRIES attempts."
           exit 1
         working-directory: ${{ github.workspace }}
-
-  codegen_windows:
-    name: Code Generation (Windows)
-    extends: .codegen_base
-    strategy:
-      matrix:
-        os: [windows-latest]
-        include:
-          - os: windows-latest
-            LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
-
-  codegen_linux:
-    name: Code Generation (Linux)
-    extends: .codegen_base
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-
-  codegen_macos:
-    name: Code Generation (macOS)
-    extends: .codegen_base
-    strategy:
-      matrix:
-        os: [macos-latest]
 
   test_on_demand:
     runs-on: ${{ matrix.os }}
