@@ -131,8 +131,8 @@ impl Archive {
     unsafe_try_call!(SFileSetMaxFileCount(
       self.handle,
       max_files_count
-        .min(HASH_TABLE_SIZE_MIN)
-        .max(HASH_TABLE_SIZE_MAX)
+        .min(HASH_TABLE_SIZE_MAX)
+        .max(HASH_TABLE_SIZE_MIN)
     ));
     Ok(())
   }
