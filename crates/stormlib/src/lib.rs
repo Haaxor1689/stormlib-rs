@@ -105,7 +105,7 @@ impl Archive {
     unsafe {
       let r = SFileHasFile(self.handle, cpath.as_ptr());
       if !r {
-        let err = stormlib_sys::GetLastError();
+        let err = SErrGetLastError();
         if err != ERROR_FILE_NOT_FOUND {
           return Err(From::from(ErrorCode(err)));
         }
@@ -189,7 +189,7 @@ impl Archive {
     unsafe {
       let r = SFileRemoveFile(self.handle, cpath.as_ptr(), 0);
       if !r {
-        let err = stormlib_sys::GetLastError();
+        let err = SErrGetLastError();
         if err != ERROR_FILE_NOT_FOUND {
           return Err(From::from(ErrorCode(err)));
         }
@@ -238,9 +238,7 @@ impl<'a> File<'a> {
     let mut high: DWORD = 0;
     let low = unsafe { SFileGetFileSize(self.file_handle, &mut high as *mut DWORD) };
     if low == SFILE_INVALID_SIZE {
-      return Err(From::from(ErrorCode(unsafe {
-        stormlib_sys::GetLastError()
-      })));
+      return Err(From::from(ErrorCode(unsafe { SErrGetLastError() })));
     }
     let high = (high as u64) << 32;
     let size = high | (low as u64);
@@ -253,7 +251,7 @@ impl<'a> File<'a> {
     if self.need_reset {
       unsafe {
         if SFileSetFilePointer(self.file_handle, 0, ptr::null_mut(), 0) == SFILE_INVALID_SIZE {
-          return Err(From::from(ErrorCode(stormlib_sys::GetLastError())));
+          return Err(From::from(ErrorCode(SErrGetLastError())));
         }
       }
     }

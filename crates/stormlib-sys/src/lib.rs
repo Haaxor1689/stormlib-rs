@@ -8,10 +8,8 @@ include!("./bindings_linux.rs");
 include!("./bindings_macos.rs");
 
 extern "C" {
-  pub fn SetLastError(dwErrCode: u32);
-}
-extern "C" {
-  pub fn GetLastError() -> u32;
+  pub fn SErrSetLastError(dwErrCode: u32);
+  pub fn SErrGetLastError() -> u32;
 }
 
 #[test]
