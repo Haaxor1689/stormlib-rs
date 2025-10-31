@@ -38,7 +38,7 @@ fn main() {
 
   #[cfg(target_os = "macos")]
   {
-    println!("cargo:rustc-link-lib=static=StormLib");
+    println!("cargo:rustc-link-lib=static=storm");
     println!("cargo:rustc-link-lib=dylib=c++");
     println!("cargo:rustc-link-lib=z");
     println!("cargo:rustc-link-lib=bz2");
@@ -46,7 +46,7 @@ fn main() {
 
   #[cfg(target_os = "linux")]
   {
-    println!("cargo:rustc-link-lib=static=StormLib");
+    println!("cargo:rustc-link-lib=static=storm");
     println!("cargo:rustc-link-lib=stdc++");
     println!("cargo:rustc-link-lib=z");
     println!("cargo:rustc-link-lib=bz2");
