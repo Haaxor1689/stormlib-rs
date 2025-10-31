@@ -1,4 +1,4 @@
-name: Rust CI (On Demand)
+name: Rust CI
 
 on:
   workflow_dispatch:
