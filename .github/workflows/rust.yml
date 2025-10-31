@@ -8,11 +8,6 @@ on:
         required: false
         default: 'false'
         type: boolean
-      run_tests:
-        description: 'Run tests on all platforms'
-        required: false
-        default: 'true' # Often default tests to true
-        type: boolean
       target_branch:
         description: 'Branch to run on (e.g., master)'
         required: true
