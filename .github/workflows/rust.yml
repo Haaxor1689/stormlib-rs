@@ -143,6 +143,3 @@ jobs:
           echo "Failed to commit and push bindings for ${{ runner.os }} after $MAX_RETRIES attempts."
           exit 1
         working-directory: ${{ github.workspace }}
-
-  test_on_demand:
-    name: Run Tests
