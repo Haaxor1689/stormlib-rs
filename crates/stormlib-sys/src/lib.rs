@@ -7,11 +7,6 @@ include!("./bindings_linux.rs");
 #[cfg(target_os = "macos")]
 include!("./bindings_macos.rs");
 
-extern "C" {
-  pub fn SErrSetLastError(dwErrCode: u32);
-  pub fn SErrGetLastError() -> u32;
-}
-
 #[test]
 fn test_w3x() {
   use std::ffi::*;
